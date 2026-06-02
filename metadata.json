@@ -1,0 +1,6 @@
+{
+  "name": "Tasks",
+  "description": "Google Tasks Clone in Dark Mode. Manage and organize your chores, work items, and details.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
