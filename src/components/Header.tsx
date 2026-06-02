@@ -6,6 +6,7 @@ interface HeaderProps {
   searchQuery: string;
   setSearchQuery: (query: string) => void;
   onAddTaskClick: () => void;
+  dbStatus?: { connected: boolean; backendType: string; uriProvided: boolean };
 }
 
 export function Header({
@@ -14,6 +15,7 @@ export function Header({
   searchQuery,
   setSearchQuery,
   onAddTaskClick,
+  dbStatus,
 }: HeaderProps) {
   return (
     <header className="flex justify-between items-center w-full px-6 h-16 bg-brand-bg relative z-50 border-b border-brand-outline select-none">
@@ -28,7 +30,22 @@ export function Header({
         </button>
         <div className="flex items-center gap-2">
           <CheckCircle2 className="w-6 h-6 text-brand-primary fill-brand-primary-container/20 shrink-0" />
-          <h1 className="font-sans font-medium text-lg tracking-tight text-brand-text">Tasks</h1>
+          <h1 className="font-sans font-medium text-lg tracking-tight text-brand-text flex items-center">
+            <span>Tasks</span>
+            {dbStatus && (
+              <span
+                className={`ml-2 text-[10px] uppercase tracking-widest px-2 py-0.5 rounded-full font-mono flex items-center gap-1 font-semibold ${
+                  dbStatus.connected
+                    ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                    : "bg-cyan-500/10 text-cyan-400 border border-cyan-500/20"
+                }`}
+                title={dbStatus.connected ? "Real-time sync stream via cloud MongoDB database" : "Real-time sync via Local In-Memory Sandbox"}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${dbStatus.connected ? "bg-emerald-400" : "bg-cyan-400 animate-pulse"}`}></span>
+                {dbStatus.connected ? "MongoDB-Cloud" : "Sandbox"}
+              </span>
+            )}
+          </h1>
         </div>
       </div>
 

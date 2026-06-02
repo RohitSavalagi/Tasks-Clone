@@ -13,6 +13,7 @@ export default function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [activeListId, setActiveListId] = useState<string>("my-tasks");
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [dbStatus, setDbStatus] = useState({ connected: false, backendType: "Sandbox", uriProvided: false });
 
   // --- UI Layout & Modal States ---
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -24,36 +25,68 @@ export default function App() {
   // --- Task Input States ---
   const [newInlineTaskTitle, setNewInlineTaskTitle] = useState("");
 
-  // --- Load seed data or localStorage ---
+  // --- Full-Stack Real-Time DB & EventSync Loader ---
   useEffect(() => {
-    const savedLists = localStorage.getItem("g_tasks_lists");
-    const savedTasks = localStorage.getItem("g_tasks_tasks");
+    // 1. Fetch DB Status and Connection Type
+    const fetchDbStatus = async () => {
+      try {
+        const res = await fetch("/api/status");
+        if (res.ok) {
+          const status = await res.json();
+          setDbStatus(status);
+        }
+      } catch (e) {
+        console.error("Failed to query database status", e);
+      }
+    };
 
-    if (savedLists) {
-      setLists(JSON.parse(savedLists));
-    } else {
-      setLists(INITIAL_LISTS);
-      localStorage.setItem("g_tasks_lists", JSON.stringify(INITIAL_LISTS));
-    }
+    // 2. Initial Data Load
+    const fetchInitialData = async () => {
+      try {
+        const [lRes, tRes] = await Promise.all([
+          fetch("/api/lists"),
+          fetch("/api/tasks")
+        ]);
+        if (lRes.ok && tRes.ok) {
+          const lData = await lRes.ok ? await lRes.json() : [];
+          const tData = await tRes.ok ? await tRes.json() : [];
+          setLists(lData);
+          setTasks(tData);
+        }
+      } catch (e) {
+        console.error("Failed to load initial tasks details", e);
+      }
+    };
 
-    if (savedTasks) {
-      setTasks(JSON.parse(savedTasks));
-    } else {
-      setTasks(INITIAL_TASKS);
-      localStorage.setItem("g_tasks_tasks", JSON.stringify(INITIAL_TASKS));
-    }
+    fetchDbStatus();
+    fetchInitialData();
+
+    // 3. Setup Server-Sent Events (SSE) stream for instant real-time synchronization between clients!
+    const sse = new EventSource("/api/events");
+    
+    sse.onmessage = (event) => {
+      try {
+        const eventData = JSON.parse(event.data);
+        if (eventData.type === "LISTS_UPDATED") {
+          fetch("/api/lists")
+            .then((r) => r.json())
+            .then((lists) => setLists(lists))
+            .catch((e) => console.error("Realtime lists update failure", e));
+        } else if (eventData.type === "TASKS_UPDATED") {
+          fetch("/api/tasks")
+            .then((r) => r.json())
+            .then((tasks) => setTasks(tasks))
+            .catch((e) => console.error("Realtime tasks update failure", e));
+        }
+      } catch (err) {
+        console.error("Failed to read server-sent synchronisation signal", err);
+      }
+    };
+
+    return () => {
+      sse.close();
+    };
   }, []);
-
-  // --- Synced updates to localStorage ---
-  const saveListsToStorage = (updatedLists: TaskList[]) => {
-    setLists(updatedLists);
-    localStorage.setItem("g_tasks_lists", JSON.stringify(updatedLists));
-  };
-
-  const saveTasksToStorage = (updatedTasks: Task[]) => {
-    setTasks(updatedTasks);
-    localStorage.setItem("g_tasks_tasks", JSON.stringify(updatedTasks));
-  };
 
   // --- Helpers & Computed Stats ---
   const activeTaskList = useMemo(() => {
@@ -102,9 +135,14 @@ export default function App() {
       createdDate: getCurrentDateFormatted(),
     };
 
-    const updatedTasks = [newTask, ...tasks];
-    saveTasksToStorage(updatedTasks);
+    setTasks([newTask, ...tasks]);
     setSelectedTaskId(newTask.id); // Open Detail Panel automatically for immediate review
+
+    fetch("/api/tasks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(newTask),
+    }).catch((e) => console.error("Error creating active task on server", e));
   };
 
   const handleInlineInputSubmit = (e: React.FormEvent) => {
@@ -131,23 +169,27 @@ export default function App() {
 
   // --- Mutating Tasks ---
   const handleUpdateTask = (updatedTask: Task) => {
-    const updated = tasks.map((t) => (t.id === updatedTask.id ? updatedTask : t));
-    saveTasksToStorage(updated);
+    setTasks(tasks.map((t) => (t.id === updatedTask.id ? updatedTask : t)));
+
+    fetch(`/api/tasks/${updatedTask.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(updatedTask),
+    }).catch((e) => console.error("Failed to update active task", e));
   };
 
   // --- Drag & Drop Methods ---
   const handleDropOnList = (taskId: string, targetListId: string) => {
-    const updated = tasks.map((t) => {
-      if (t.id === taskId) {
-        if (targetListId === "starred") {
-          return { ...t, isStarred: true };
-        } else {
-          return { ...t, listId: targetListId };
-        }
-      }
-      return t;
-    });
-    saveTasksToStorage(updated);
+    const task = tasks.find((t) => t.id === taskId);
+    if (!task) return;
+
+    let updated;
+    if (targetListId === "starred") {
+      updated = { ...task, isStarred: true };
+    } else {
+      updated = { ...task, listId: targetListId };
+    }
+    handleUpdateTask(updated);
   };
 
   const handleTaskReorder = (draggedId: string, targetId: string) => {
@@ -169,35 +211,39 @@ export default function App() {
 
     // Insert at target location
     nextTasks.splice(targetIdx, 0, removed);
-    saveTasksToStorage(nextTasks);
+    setTasks(nextTasks);
+
+    fetch("/api/tasks/sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(nextTasks),
+    }).catch((e) => console.error("Failed to sync reordered tasks list on backend", e));
   };
 
   const handleToggleComplete = (taskId: string, e: React.MouseEvent) => {
-    const updated = tasks.map((t) => {
-      if (t.id === taskId) {
-        return { ...t, isCompleted: !t.isCompleted };
-      }
-      return t;
-    });
-    saveTasksToStorage(updated);
+    const task = tasks.find((t) => t.id === taskId);
+    if (!task) return;
+    const updated = { ...task, isCompleted: !task.isCompleted };
+    handleUpdateTask(updated);
   };
 
   const handleToggleStarred = (taskId: string, e: React.MouseEvent) => {
-    const updated = tasks.map((t) => {
-      if (t.id === taskId) {
-        return { ...t, isStarred: !t.isStarred };
-      }
-      return t;
-    });
-    saveTasksToStorage(updated);
+    const task = tasks.find((t) => t.id === taskId);
+    if (!task) return;
+    const updated = { ...task, isStarred: !task.isStarred };
+    handleUpdateTask(updated);
   };
 
   const handleDeleteTask = (taskId: string) => {
     const remaining = tasks.filter((t) => t.id !== taskId);
-    saveTasksToStorage(remaining);
+    setTasks(remaining);
     if (selectedTaskId === taskId) {
       setSelectedTaskId(null);
     }
+
+    fetch(`/api/tasks/${taskId}`, {
+      method: "DELETE",
+    }).catch((e) => console.error("Failed to delete task from DB", e));
   };
 
   // --- Custom List management ---
@@ -209,22 +255,31 @@ export default function App() {
       icon: "Library",
       isSystem: false,
     };
-    saveListsToStorage([...lists, newList]);
+    setLists([...lists, newList]);
     setActiveListId(listId);
+
+    fetch("/api/lists", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(newList),
+    }).catch((e) => console.error("Error creating new active list", e));
   };
 
   const handleDeleteActiveCustomList = () => {
     if (activeListId === "my-tasks" || activeListId === "starred") return;
 
     if (confirm(`Do you want to delete the list "${activeTaskList?.name}" and all its tasks?`)) {
-      // Re-route remaining tasks or purge them
       const remainingTasks = tasks.filter((t) => t.listId !== activeListId);
       const remainingLists = lists.filter((l) => l.id !== activeListId);
 
-      saveTasksToStorage(remainingTasks);
-      saveListsToStorage(remainingLists);
+      setTasks(remainingTasks);
+      setLists(remainingLists);
       setActiveListId("my-tasks");
       setSelectedTaskId(null);
+
+      fetch(`/api/lists/${activeListId}`, {
+        method: "DELETE",
+      }).catch((e) => console.error("Failed to delete list from backend", e));
     }
   };
 
@@ -271,7 +326,13 @@ export default function App() {
       const remaining = tasks.filter(
         (t) => !(t.isCompleted && (activeListId === "starred" ? t.isStarred : t.listId === activeListId))
       );
-      saveTasksToStorage(remaining);
+      setTasks(remaining);
+
+      fetch("/api/tasks/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(remaining),
+      }).catch((e) => console.error("Failed to sync cleared tasks list", e));
     }
   };
 
@@ -285,6 +346,7 @@ export default function App() {
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}
         onAddTaskClick={handleFabClick}
+        dbStatus={dbStatus}
       />
 
       <div className="flex-1 flex overflow-hidden relative">
@@ -547,6 +609,27 @@ export default function App() {
             </div>
             <div className="p-5 space-y-5 text-sm">
               <div className="space-y-1">
+                <label className="text-xs text-brand-text-dim font-semibold uppercase tracking-wider">Database Link Status</label>
+                <div className="flex flex-col gap-1.5 p-3 rounded-lg bg-brand-surface-low border border-brand-outline">
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium text-brand-text">Backend Hub</span>
+                    <span className={`text-[10px] uppercase font-bold px-2.5 py-0.5 rounded-full border ${
+                      dbStatus.connected
+                        ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                        : "bg-cyan-500/10 text-cyan-400 border-cyan-500/20"
+                    }`}>
+                      {dbStatus.connected ? "MongoDB Live" : "Local Sandbox"}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-brand-text-dim leading-relaxed">
+                    {dbStatus.connected
+                      ? "Your task lists are streaming and persisting instantly inside MongoDB Atlas in real time!"
+                      : "Currently running on the local server in-memory database fallback. Configure the MONGODB_URI secret inside settings to promote to cloud."}
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-1">
                 <label className="text-xs text-brand-text-dim font-semibold uppercase tracking-wider">Visual Theme</label>
                 <div className="flex items-center justify-between p-3 rounded-lg bg-brand-surface-low border border-brand-outline">
                   <span className="font-medium">Task Direct Dark Mode</span>
@@ -562,18 +645,18 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="space-y-2 pt-2">
+              <div className="space-y-2 pt-1">
                 <button
                   onClick={() => {
-                    if (confirm("Reset application default lists & clear all saved tasks?")) {
+                    if (confirm("Reset current browser cache & refresh tasks lists connection?")) {
                       localStorage.clear();
                       location.reload();
                     }
                   }}
-                  className="w-full py-2.5 px-4 bg-red-500/15 text-red-400 hover:bg-red-500/25 border border-red-500/30 rounded-xl font-semibold transition-colors duration-200 cursor-pointer text-center text-xs flex justify-center items-center gap-2"
+                  className="w-full py-2.5 px-4 bg-red-400/10 hover:bg-red-400/20 text-red-400 border border-red-500/20 rounded-xl font-semibold transition-colors duration-200 cursor-pointer text-center text-xs flex justify-center items-center gap-2"
                 >
                   <AlertCircle className="w-4 h-4" />
-                  <span>Restore Factory Defaults</span>
+                  <span>Refresh Sandbox Cache</span>
                 </button>
               </div>
             </div>
