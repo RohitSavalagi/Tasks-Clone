@@ -10,6 +10,7 @@ interface SidebarProps {
   onOpenHelp: () => void;
   onOpenSettings: () => void;
   starredCount: number;
+  onDropOnList?: (taskId: string, targetListId: string) => void;
 }
 
 export function Sidebar({
@@ -20,9 +21,11 @@ export function Sidebar({
   onOpenHelp,
   onOpenSettings,
   starredCount,
+  onDropOnList,
 }: SidebarProps) {
   const [isCreating, setIsCreating] = useState(false);
   const [newListName, setNewListName] = useState("");
+  const [draggedOverListId, setDraggedOverListId] = useState<string | null>(null);
 
   const handleCreateListSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -30,6 +33,29 @@ export function Sidebar({
       onCreateList(newListName.trim());
       setNewListName("");
       setIsCreating(false);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent, listId: string) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+  };
+
+  const handleDragEnter = (e: React.DragEvent, listId: string) => {
+    e.preventDefault();
+    setDraggedOverListId(listId);
+  };
+
+  const handleDragLeave = () => {
+    setDraggedOverListId(null);
+  };
+
+  const handleDrop = (e: React.DragEvent, listId: string) => {
+    e.preventDefault();
+    setDraggedOverListId(null);
+    const taskId = e.dataTransfer.getData("text/plain");
+    if (taskId && onDropOnList) {
+      onDropOnList(taskId, listId);
     }
   };
 
@@ -43,23 +69,28 @@ export function Sidebar({
     return <Icons.List className={className} />;
   };
 
-  // Let's insert "Starring" in the list items dynamically at the right place.
-  // In the layout: My Tasks, Work, Personal, Starring, Groceries.
-  // We can separate lists list and render Starring dynamically.
-  
   return (
     <nav className="h-full w-[280px] p-4 bg-brand-surface-low border-r border-brand-outline flex flex-col justify-between select-none">
       <div className="space-y-1">
         {/* Render tasks categories */}
         {lists.map((list) => {
           const isActive = activeListId === list.id;
+          const isDraggedOver = draggedOverListId === list.id;
           return (
             <button
               key={list.id}
               onClick={() => setActiveListId(list.id)}
-              className={`flex items-center gap-3 w-full px-4 py-3 rounded-full font-medium text-sm transition-all duration-200 cursor-pointer ${
-                isActive
-                  ? "bg-brand-secondary-container text-brand-on-secondary-container"
+              onDragOver={(e) => handleDragOver(e, list.id)}
+              onDragEnter={(e) => handleDragEnter(e, list.id)}
+              onDragLeave={handleDragLeave}
+              onDrop={(e) => handleDrop(e, list.id)}
+              className={`flex items-center gap-3 w-full px-4 py-3 rounded-full font-medium text-sm transition-all duration-200 cursor-pointer border ${
+                isDraggedOver
+                  ? "bg-brand-primary/10 border-brand-primary border-dashed text-brand-primary animate-pulse"
+                  : "border-transparent"
+              } ${
+                isActive && !isDraggedOver
+                  ? "bg-brand-secondary-container text-brand-on-secondary-container font-semibold"
                   : "text-brand-text-muted hover:bg-brand-surface-high hover:text-brand-text"
               }`}
             >
@@ -72,24 +103,38 @@ export function Sidebar({
         })}
 
         {/* Dynamic Starring Tab */}
-        <button
-          onClick={() => setActiveListId("starred")}
-          className={`flex items-center gap-3 w-full px-4 py-3 rounded-full font-medium text-sm transition-all duration-200 cursor-pointer ${
-            activeListId === "starred"
-              ? "bg-brand-secondary-container text-brand-on-secondary-container"
-              : "text-brand-text-muted hover:bg-brand-surface-high hover:text-brand-text"
-          }`}
-        >
-          <span className={activeListId === "starred" ? "text-brand-on-secondary-container" : "text-brand-tertiary"}>
-            <Icons.Star className="w-5 h-5 fill-current" />
-          </span>
-          <span className="truncate flex-1 text-left">Starring</span>
-          {starredCount > 0 && (
-            <span className="bg-brand-surface-highest text-xs text-brand-text-muted px-2 py-0.5 rounded-full">
-              {starredCount}
-            </span>
-          )}
-        </button>
+        {(() => {
+          const isStarredActive = activeListId === "starred";
+          const isStarredHovered = draggedOverListId === "starred";
+          return (
+            <button
+              onClick={() => setActiveListId("starred")}
+              onDragOver={(e) => handleDragOver(e, "starred")}
+              onDragEnter={(e) => handleDragEnter(e, "starred")}
+              onDragLeave={handleDragLeave}
+              onDrop={(e) => handleDrop(e, "starred")}
+              className={`flex items-center gap-3 w-full px-4 py-3 rounded-full font-medium text-sm transition-all duration-200 cursor-pointer border ${
+                isStarredHovered
+                  ? "bg-yellow-400/10 border-yellow-400 border-dashed text-yellow-400 animate-pulse"
+                  : "border-transparent"
+              } ${
+                isStarredActive && !isStarredHovered
+                  ? "bg-brand-secondary-container text-brand-on-secondary-container font-semibold"
+                  : "text-brand-text-muted hover:bg-brand-surface-high hover:text-brand-text"
+              }`}
+            >
+              <span className={isStarredActive ? "text-brand-on-secondary-container" : "text-brand-tertiary"}>
+                <Icons.Star className="w-5 h-5 fill-current" />
+              </span>
+              <span className="truncate flex-1 text-left">Starring</span>
+              {starredCount > 0 && (
+                <span className="bg-brand-surface-highest text-xs text-brand-text-muted px-2 py-0.5 rounded-full">
+                  {starredCount}
+                </span>
+              )}
+            </button>
+          );
+        })()}
 
         {/* Create new list block */}
         <div className="pt-2 border-t border-brand-outline mt-3">

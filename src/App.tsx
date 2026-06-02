@@ -135,6 +135,43 @@ export default function App() {
     saveTasksToStorage(updated);
   };
 
+  // --- Drag & Drop Methods ---
+  const handleDropOnList = (taskId: string, targetListId: string) => {
+    const updated = tasks.map((t) => {
+      if (t.id === taskId) {
+        if (targetListId === "starred") {
+          return { ...t, isStarred: true };
+        } else {
+          return { ...t, listId: targetListId };
+        }
+      }
+      return t;
+    });
+    saveTasksToStorage(updated);
+  };
+
+  const handleTaskReorder = (draggedId: string, targetId: string) => {
+    if (draggedId === targetId) return;
+
+    const dragIdx = tasks.findIndex((t) => t.id === draggedId);
+    const targetIdx = tasks.findIndex((t) => t.id === targetId);
+
+    if (dragIdx === -1 || targetIdx === -1) return;
+
+    const nextTasks = [...tasks];
+    const [removed] = nextTasks.splice(dragIdx, 1);
+    
+    // Auto align listId to target task's listId if drag target is valid
+    const targetTask = nextTasks[targetIdx];
+    if (targetTask && removed.listId !== targetTask.listId) {
+      removed.listId = targetTask.listId;
+    }
+
+    // Insert at target location
+    nextTasks.splice(targetIdx, 0, removed);
+    saveTasksToStorage(nextTasks);
+  };
+
   const handleToggleComplete = (taskId: string, e: React.MouseEvent) => {
     const updated = tasks.map((t) => {
       if (t.id === taskId) {
@@ -266,6 +303,7 @@ export default function App() {
             onOpenHelp={() => setShowHelpModal(true)}
             onOpenSettings={() => setShowSettingsModal(true)}
             starredCount={starredTasksCount}
+            onDropOnList={handleDropOnList}
           />
         </div>
 
@@ -360,6 +398,10 @@ export default function App() {
                       onClick={() => setSelectedTaskId(t.id)}
                       onToggleComplete={handleToggleComplete}
                       onToggleStarred={handleToggleStarred}
+                      onDrop={(e, targetId) => {
+                        const draggedId = e.dataTransfer.getData("text/plain");
+                        if (draggedId) handleTaskReorder(draggedId, targetId);
+                      }}
                     />
                   ))}
                 </div>
@@ -390,6 +432,10 @@ export default function App() {
                           onClick={() => setSelectedTaskId(t.id)}
                           onToggleComplete={handleToggleComplete}
                           onToggleStarred={handleToggleStarred}
+                          onDrop={(e, targetId) => {
+                            const draggedId = e.dataTransfer.getData("text/plain");
+                            if (draggedId) handleTaskReorder(draggedId, targetId);
+                          }}
                         />
                       ))}
                     </div>

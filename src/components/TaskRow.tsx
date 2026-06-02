@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { Task } from "../types";
 import { GripVertical, Star, Calendar, CornerDownRight, Check, FileText } from "lucide-react";
 
@@ -9,6 +9,10 @@ interface TaskRowProps {
   onClick: () => void;
   onToggleComplete: (taskId: string, e: React.MouseEvent) => void;
   onToggleStarred: (taskId: string, e: React.MouseEvent) => void;
+  onDragStart?: (e: React.DragEvent, taskId: string) => void;
+  onDragOver?: (e: React.DragEvent, taskId: string) => void;
+  onDragEnd?: (e: React.DragEvent) => void;
+  onDrop?: (e: React.DragEvent, taskId: string) => void;
 }
 
 export function TaskRow({
@@ -17,7 +21,13 @@ export function TaskRow({
   onClick,
   onToggleComplete,
   onToggleStarred,
+  onDragStart,
+  onDragOver,
+  onDragEnd,
+  onDrop,
 }: TaskRowProps) {
+  const [isDragOver, setIsDragOver] = useState(false);
+
   // Check if task is overdue/urgent (e.g., contains 'Today' or 'Tomorrow')
   const isUrgentDate = (dateStr?: string) => {
     if (!dateStr) return false;
@@ -28,17 +38,63 @@ export function TaskRow({
   const totalSubtasks = task.subtasks.length;
   const completedSubtasks = task.subtasks.filter((s) => s.isCompleted).length;
 
+  const handleDragStartLocal = (e: React.DragEvent) => {
+    e.dataTransfer.setData("text/plain", task.id);
+    e.dataTransfer.effectAllowed = "move";
+    if (onDragStart) {
+      onDragStart(e, task.id);
+    }
+  };
+
+  const handleDragOverLocal = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setIsDragOver(true);
+    if (onDragOver) {
+      onDragOver(e, task.id);
+    }
+  };
+
+  const handleDragLeaveLocal = () => {
+    setIsDragOver(false);
+  };
+
+  const handleDropLocal = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    if (onDrop) {
+      onDrop(e, task.id);
+    }
+  };
+
+  const preventInteractDrag = (e: React.DragEvent) => {
+    // Interacting with buttons/interactive items shouldn't start list dragging
+    e.stopPropagation();
+    e.preventDefault();
+  };
+
   return (
     <div
       onClick={onClick}
-      className={`group/row flex items-center gap-3 p-3 hover:bg-brand-surface-high transition-all duration-200 cursor-pointer rounded-xl select-none ${
+      draggable={true}
+      onDragStart={handleDragStartLocal}
+      onDragOver={handleDragOverLocal}
+      onDragLeave={handleDragLeaveLocal}
+      onDragEnd={onDragEnd}
+      onDrop={handleDropLocal}
+      className={`group/row flex items-center gap-3 p-3 transition-all duration-200 cursor-pointer rounded-xl select-none relative ${
         isActive
           ? "bg-brand-surface-high border-l-4 border-brand-primary shadow-sm"
           : "border-l-4 border-transparent"
-      } ${task.isCompleted ? "opacity-60" : ""}`}
+      } ${task.isCompleted ? "opacity-60" : ""} ${
+        isDragOver ? "border-brand-primary/50 bg-brand-surface-highest/40 scale-[1.01] border-2 border-dashed border-spacing-1" : ""
+      }`}
     >
       {/* Drag Indicator - Visible on row hover */}
-      <div className="w-5 flex items-center justify-center text-brand-outline opacity-0 group-hover/row:opacity-100 transition-opacity duration-150 cursor-grab active:cursor-grabbing">
+      <div 
+        className="w-5 flex items-center justify-center text-brand-outline opacity-50 group-hover/row:opacity-100 transition-opacity duration-150 cursor-grab active:cursor-grabbing"
+        title="Drag task to reorder or move between lists"
+      >
         <GripVertical className="w-4 h-4" />
       </div>
 
@@ -48,6 +104,7 @@ export function TaskRow({
           e.stopPropagation();
           onToggleComplete(task.id, e);
         }}
+        onDragStart={preventInteractDrag}
         className={`w-5.5 h-5.5 rounded-full border-2 flex items-center justify-center transition-all duration-200 cursor-pointer ${
           task.isCompleted
             ? "border-brand-primary bg-brand-primary-container/20 text-brand-primary"
@@ -98,7 +155,7 @@ export function TaskRow({
 
             {/* Notes Indicator */}
             {task.notes && (
-              <span className="text-xs text-brand-text-dim flex items-center gap-1 title={task.notes}">
+              <span className="text-xs text-brand-text-dim flex items-center gap-1" title={task.notes}>
                 <FileText className="w-3.5 h-3.5" />
                 <span className="truncate max-w-[120px]">{task.notes}</span>
               </span>
@@ -113,6 +170,7 @@ export function TaskRow({
           e.stopPropagation();
           onToggleStarred(task.id, e);
         }}
+        onDragStart={preventInteractDrag}
         className={`p-1.5 rounded-full hover:bg-brand-surface-highest transition-colors cursor-pointer ${
           task.isStarred
             ? "text-brand-tertiary"
@@ -124,3 +182,4 @@ export function TaskRow({
     </div>
   );
 }
+
